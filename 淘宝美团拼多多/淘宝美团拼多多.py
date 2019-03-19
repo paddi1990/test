@@ -68,8 +68,10 @@ class Query:
                 "select param_value from params where param_key='%s' and webtype='%s' and param_type='%s'" % (
                     param_key, webtype, param_type))
             result = cursor.fetchall()
-            if len(result) > 0:
+            if  result is not  None and len(result) > 0:
                 return result[0][0]
+            else:
+                raise Exception("找不到参数名:%s,网站类型:%s，参数类型:%s的参数" % (param_key,webtype,param_type))
         except Exception as e:
             save_log(e)
             db.rollback()
