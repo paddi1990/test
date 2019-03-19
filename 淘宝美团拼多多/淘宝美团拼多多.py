@@ -26,32 +26,89 @@ meituan_headers = {
     'Content-Type': 'application/x-www-form-urlencoded'
 }
 
-# 淘宝cookie
-taobao_cookie_str = 't=58f01388d37c12e4b904632c98bc2340; tg=0; miid=1140221098795604833; cna=e13CFFSdbV4CAXeCRnf5b+ad; thw=cn; enc=X80PC4Xcb4PdS4h%2FPXuy1%2FTr3G7rvKeMxhc%2F9BkM1zRRBnbDih1PQFOczPbVA%2BrJSCljgChqmgWTIUVm2QIsYg%3D%3D; hng=CN%7Czh-CN%7CCNY%7C156; x=e%3D1%26p%3D*%26s%3D0%26c%3D0%26f%3D0%26g%3D0%26t%3D0%26__ll%3D-1%26_ato%3D0; _m_h5_tk=d097d6bcf544205cd7f8e9b342f3326e_1552470808430; _m_h5_tk_enc=fd0f202c3e625ce825dc7fcafd5ec81a; cookie2=15fa9a0fc16781863e12286c1fe46e81; _tb_token_=e6bb55953bb17; alitrackid=www.taobao.com; lastalitrackid=www.taobao.com; swfstore=229596; _uab_collina=155255037263767822106308; _cc_=UtASsssmfA%3D%3D; mt=ci=0_0; v=0; JSESSIONID=7F1211905EA58F14CD180BE65AC16733; l=bBOgUgOlv1G9EfntBOCZiuIJHR_OSIRYSuPRwpdBi_5Nr6L1syQOl1fGvFp6Vj5R_tTB4xWabNp9-etui; isg=BDAwbg5sGLjmbMR-zfjwZ6zUAf5C0SbiWdUhUCqB_Ate5dCP0onkU4ZXOa0g8Myb'
-# 美团外卖cookie
-meituan_cookie_str = 'ci=92; rvct=92; _lxsdk_cuid=16876610ae368-0eabf8c5622f5-58422116-1fa400-16876610ae4c8; _ga=GA1.3.1239302239.1552481275; _lxsdk=16876610ae368-0eabf8c5622f5-58422116-1fa400-16876610ae4c8; _gid=GA1.3.963692352.1552620215; _lx_utm=utm_source%3DBaidu%26utm_medium%3Dorganic; __mta=251033145.1552481277631.1552481320994.1552625379147.3; wm_order_channel=default; openh5_uuid=16876610ae368-0eabf8c5622f5-58422116-1fa400-16876610ae4c8; uuid=16876610ae368-0eabf8c5622f5-58422116-1fa400-16876610ae4c8; terminal=i; w_utmz="utm_campaign=(direct)&utm_source=5000&utm_medium=(none)&utm_content=(none)&utm_term=(none)"; openh5_uuid=16876610ae368-0eabf8c5622f5-58422116-1fa400-16876610ae4c8; w_actual_lat=23099643; w_actual_lng=113313734; w_visitid=a6048d55-46cf-4e5c-a29d-50d200fc48a0; w_latlng=23096943,113329596; _lxsdk_s=16981f47bf0-474-b18-f4c%7C%7C12'
-
-# 经纬度
-wm_latitude = '23096943'
-wm_longitude = '113329596'
-
 gbk = 'gbk'
 utf8 = 'utf-8'
 unicode = 'unicode_escape'
 
-cf = configparser.ConfigParser()
-try:
-    cf.read('db.ini')
-    database = cf.get('config', 'database')
-    host = cf.get('config', 'host')
-    user = cf.get('config', 'user')
-    password = cf.get('config', 'password')
-    port = cf.get('config', 'port')
-    if database=='' or host=='' or user=='' or password=='' or port=='':
-        raise Exception("错误配置")
-except Exception as e:
-    print('配置不存在')
-    raise Exception(e)
+
+class Query:
+
+    def __init__(self) -> None:
+        super().__init__()
+        cf = configparser.ConfigParser()
+        try:
+            cf.read('db.ini')
+            self.database = cf.get('config', 'database')
+            self.host = cf.get('config', 'host')
+            self.user = cf.get('config', 'user')
+            self.password = cf.get('config', 'password')
+            self.port = cf.get('config', 'port')
+            if self.database == '' or self.host == '' or self.user == '' or self.password == '' or self.port == '':
+                raise Exception("错误配置")
+        except Exception as e:
+            print('配置不存在')
+            raise Exception(e)
+
+    def connect(self):
+        # 打开数据库连接
+        try:
+            return pymysql.connect(host=self.host, port=int(self.port), user=self.user, password=self.password,
+                                   db=self.database)
+        except Exception as e:
+            save_log(e)
+            raise Exception('无法连接数据库')
+
+    def getParam(self, param_key, webtype, param_type):
+        # 使用cursor()方法获取操作游标
+        db = self.connect()
+        cursor = None
+        try:
+            cursor = db.cursor()
+            cursor.execute(
+                "select param_value from params where param_key='%s' and webtype='%s' and param_type='%s'" % (
+                    param_key, webtype, param_type))
+            result = cursor.fetchall()
+            if len(result) > 0:
+                return result[0][0]
+        except Exception as e:
+            save_log(e)
+            db.rollback()
+        finally:
+            if not cursor is None:
+                cursor.close()
+            db.close()
+
+    def insert(self, sql_list):
+        db = self.connect()
+        # 使用cursor()方法获取操作游标
+        cursor = db.cursor()
+        try:
+            for sql in sql_list:
+                print('执行sql:%s' % sql)
+                # 执行sql语句
+                cursor.execute(sql)
+                # 执行sql语句
+                db.commit()
+        except Exception as e:
+            save_log(e)
+            # 发生错误时回滚
+            db.rollback()
+        finally:
+            # 关闭数据库连接
+            cursor.close()
+            db.close()
+
+
+query = Query()
+
+# 淘宝cookie
+taobao_cookie_str = query.getParam('cookie', '淘宝', 'cookie')
+# 美团外卖cookie
+meituan_cookie_str = query.getParam('cookie', '美团', 'cookie')
+
+# 经纬度
+wm_latitude = query.getParam('wm_latitude', '美团', '表单参数')
+wm_longitude = query.getParam('wm_longitude', '美团', '表单参数')
 
 
 def parse_cookie(cookie_str):
@@ -80,7 +137,7 @@ def parse_yangkeduo_by_1():
 
 
 def parse_yangkeduo(keyword, page):
-    anti_content = '0alAfxn5Hy1jY9dVmW5NPiiTaFtswaPfEyBSbs_w62g_B-kVst08edE_knPYAVhn4kzv8jvhFkWSfciToyaouyyumJNNLc6log9o0XoVvU4WHX1RyvS8eyeyHZDiYKU3NeXjNSk2suKg_HaItdj4y8Gr8ydZpgYGKMVwYe9NiD4n_JNEJJnMaqhHdBFE_XARJ3yYBBZ-8VSFpLPE1yJzSdyDNem6Zcw4av8RsLg0kNsiXrpVNHx4LsOEaK5_VjQc4L2aBWagBy7-yHRGudVQ0wQX94hS_x-JXZWCVWWovOEZ5mlPJoBaQE4ZIj9JWuQVuw-GZddQPus9Zm9hPlyw6MZfgqoyQgu66VlLIVKb-TUP4pGweKwr9qj3zpmxeDhb47mNgWCyEiWSPuky0WOOK__zN_YYzaenFMLlt0D2mtjk7N9xLcFbb3CAuufHwpfukUO_KVfQ0_LRIZJi7xtesUfu47_15y2dk6kzFCX-LeftQQnoguWAmbvcDr4K89me1HcByuYru0EYDuvhNSYTwaNx72QbLsnB8M81eoqPki16D8zRY8R9eDy13X'
+    anti_content = query.getParam('anti_content', '拼多多', '查询参数')
     url = 'http://apiv3.yangkeduo.com/search?page=%d&size=50&sort=default&requery=0&list_id=tNlvLMrbCA&q=%s&anti_content=%s&pdduid=0' % (
         page, keyword, anti_content)
     response = requests.get(url, headers=pinduoduo_headers)
@@ -147,7 +204,7 @@ def parse_yangkeduo_Detail(id, pages=5):
                                         time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(comment['time']))))
                     else:
                         raise Exception("解析拼多多评论异常")
-                insert(sql_list)
+                query.insert(sql_list)
     else:
         raise Exception('请更新拼多多cookie信息')
 
@@ -231,15 +288,15 @@ def parse_taobao_detail(data, pages=5):
                 raise Exception('解析评论异常')
             if page == lastPage:
                 break
-        insert(sql_list)
+        query.insert(sql_list)
     else:
         print(response.status_code)
         raise Exception("解析:商品%s详情失败" % data['raw_title'])
 
 
 def meituan():
-    X_FOR_WITH = 'Yg9/5iA4Fzb/BDawuCVhtRqSbIOXgl3Rt+kDSpcaijaHaFbyQQJ5UjnvkIMGvIJ5f4zBnOHFTRmauDjfV5R5+/WqlGAT+Nt0XkH6Vpqx079j+Mm7wcROgIKDJZKtaO6nManhU7dHV/sHvCQty3CGHQ=='
-    _Param = '1552663499685'
+    X_FOR_WITH = query.getParam('X_FOR_WITH', '美团', '查询参数')
+    _Param = query.getParam('_', '美团', '查询参数')
 
     data = 'startIndex=0&sortId=&navigateType=910&firstCategoryId=910&secondCategoryId=910&multiFilterIds=&sliderSelectCode=&sliderSelectMin=&sliderSelectMax=&actualLat=23.099643&actualLng=113.313734&initialLat=23.096943&initialLng=113.329596&geoType=2&rankTraceId=&wm_latitude=%s&wm_longitude=%s&wm_actual_latitude=23099643&wm_actual_longitude=113313734&_token=' % (
         wm_latitude, wm_longitude)
@@ -296,7 +353,7 @@ def meituan():
                         for category in categoryList:
                             food = {'categoryName': category['categoryName']}
                             categoryName = food['categoryName']
-                            #print('categoryName:%s\n' % categoryName)
+                            # print('categoryName:%s\n' % categoryName)
                             spuList = category['spuList']
                             for spu in spuList:
                                 food['spuId'] = spu['spuId']
@@ -322,14 +379,14 @@ def meituan():
                                 else:
                                     food_list[str(food['spuId'])] = food
                         for food_data in food_list:
-                            _data=food_list[food_data]
+                            _data = food_list[food_data]
                             sql_list.append(
                                 "insert into food (spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice, spuDesc) VALUES (%s,'%s','%s','%s',%s,%s,%s,'%s')" % (
                                     _data['spuId'], _data['categoryName'], _data['spuName'],
                                     _data['unit'], _data['saleVolume'], _data['originPrice'],
                                     _data['currentPrice'],
                                     _data['spuDesc']))
-                        insert(sql_list)
+                        query.insert(sql_list)
                     else:
                         raise Exception("解析美团店铺详情异常")
                 else:
@@ -341,60 +398,14 @@ def meituan():
         raise Exception("美团参数过期，需要更新")
 
 
-def connect():
-    # 打开数据库连接
-    try:
-        db = pymysql.connect(host=host, port=int(port), user=user, password=password, db=database)
-        return db
-    except Exception as e:
-        save_log(e)
-        raise Exception('无法连接数据库')
-
-
-def insert(sql_list):
-    db = connect()
-    # 使用cursor()方法获取操作游标
-    cursor = db.cursor()
-    try:
-        for sql in sql_list:
-            print('执行sql:%s' % sql)
-            # 执行sql语句
-            cursor.execute(sql)
-            # 执行sql语句
-            db.commit()
-    except Exception as e:
-        save_log(e)
-        # 发生错误时回滚
-        db.rollback()
-    finally:
-        # 关闭数据库连接
-        cursor.close()
-        db.close()
-
-def save_log(msg):
+def save_log(msg, type='数据库'):
     if not msg is str:
-        msg = str(msg)
+        msg = str(msg).replace('\'', "")
     print(msg)
     now = time.localtime(int(time.time()))
-    date = time.strftime('%Y-%m-%d', now)
     datetime = time.strftime('%Y-%m-%d %H:%M:%S', now)
-    with open('db%s.log' % date, 'a+', encoding=utf8) as f:
-        f.write('%s%s\n' % (datetime, msg))
+    query.insert(["insert into log (log_time, log_msg, log_type) VALUES ('%s','%s','%s')" % (datetime, msg, type)])
 
-def get_value(sql):
-    db = connect()
-    # 使用cursor()方法获取操作游标
-    cursor = db.cursor()
-    try:
-        cursor.execute(sql)
-        cursor=cursor.fetchall()
-        json={}
-    except Exception as e:
-        save_log(e)
-        db.rollback()
-    finally:
-        cursor.close()
-        db.close()
+
 if __name__ == '__main__':
-    # meituan()
-    get_value("select * from food")
+    meituan()
