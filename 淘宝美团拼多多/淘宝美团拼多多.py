@@ -68,10 +68,10 @@ class Query:
                 "select param_value from params where param_key='%s' and webtype='%s' and param_type='%s'" % (
                     param_key, webtype, param_type))
             result = cursor.fetchall()
-            if  result is not  None and len(result) > 0:
+            if result is not None and len(result) > 0:
                 return result[0][0]
             else:
-                raise Exception("找不到参数名:%s,网站类型:%s，参数类型:%s的参数" % (param_key,webtype,param_type))
+                raise Exception("找不到参数名:%s,网站类型:%s，参数类型:%s的参数" % (param_key, webtype, param_type))
         except Exception as e:
             save_log(e)
             db.rollback()
@@ -105,12 +105,20 @@ query = Query()
 
 # 淘宝cookie
 taobao_cookie_str = query.getParam('cookie', '淘宝', 'cookie')
+if taobao_cookie_str is None or len(taobao_cookie_str) == 0:
+    raise Exception("淘宝Cookie为空")
 # 美团外卖cookie
 meituan_cookie_str = query.getParam('cookie', '美团', 'cookie')
+if meituan_cookie_str is None or len(meituan_cookie_str) == 0:
+    raise Exception("美团Cookie为空")
 
 # 经纬度
 wm_latitude = query.getParam('wm_latitude', '美团', '表单参数')
+if wm_latitude is None or len(wm_latitude) == 0:
+    raise Exception('纬度为空')
 wm_longitude = query.getParam('wm_longitude', '美团', '表单参数')
+if wm_longitude is None or len(wm_longitude) == 0:
+    raise Exception("经度为空")
 
 
 def parse_cookie(cookie_str):
@@ -138,8 +146,10 @@ def parse_yangkeduo_by_1():
     print(response.content)
 
 
-def parse_yangkeduo(keyword, page):
+def parse_yangkeduo(keyword, page=5):
     anti_content = query.getParam('anti_content', '拼多多', '查询参数')
+    if anti_content is None or len(anti_content) == 0:
+        raise Exception("anti_content参数为空")
     url = 'http://apiv3.yangkeduo.com/search?page=%d&size=50&sort=default&requery=0&list_id=tNlvLMrbCA&q=%s&anti_content=%s&pdduid=0' % (
         page, keyword, anti_content)
     response = requests.get(url, headers=pinduoduo_headers)
@@ -163,13 +173,13 @@ def parse_yangkeduo_Detail(id, pages=5):
     print('开始解析：%s' % url)
     response = requests.get(url, headers=pinduoduo_headers)
     if response.status_code == 200:
-        html = response.content.decode(unicode)
+        html = response.content.decode(utf8)
         rawData = re.findall('rawData=.*', html)
         if len(rawData) > 0 and str(rawData[0][9:len(rawData[0]) - 1]).startswith('{') and str(
                 rawData[0][9:len(rawData[0]) - 1]).endswith('}'):
             detail_data = json.loads(rawData[0][9:len(rawData[0]) - 1])
-            if 'initDataObj' in detail_data and 'goods' in detail_data['initDataObj']:
-                goods = detail_data['initDataObj']['goods']
+            if 'store' in detail_data and 'initDataObj' in detail_data['store'] and 'goods' in detail_data['store']['initDataObj']:
+                goods = detail_data['store']['initDataObj']['goods']
                 # 商品标题
                 goodsName = "".join(goods['goodsName'].split())
                 # 单独价格
@@ -204,31 +214,42 @@ def parse_yangkeduo_Detail(id, pages=5):
                                     "insert into comments (goodsId,comments,comment_time,type) values (%d,'%s','%s',1)" % (
                                         id, comment['comment'],
                                         time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(comment['time']))))
+                        else:
+                            raise Exception('找不到data')
                     else:
                         raise Exception("解析拼多多评论异常")
                 query.insert(sql_list)
+            else:
+                raise Exception('数据解析异常')
     else:
         raise Exception('请更新拼多多cookie信息')
 
 
 def parse_taobao(keyword):
-    response = requests.get('https://s.taobao.com/search?q=%s' % keyword, headers=taobao_headers,
-                            cookies=parse_cookie(taobao_cookie_str))
-    if response.status_code == 200:
-        html = response.content.decode(response.apparent_encoding)
-        if len(re.findall('security-X5', html)) > 0:
-            raise Exception("打开浏览器通过验证更新淘宝cookie信息")
-        if len(re.findall("<title>\s+\w+", html)) > 0 and (re.findall("<title>\s+\w+", html)[0]).index('淘宝网') != -1:
-            raise Exception("打开浏览器通过验证更新淘宝cookie信息")
-        if len(re.findall('g_page_config.*', html)) > 0:
-            str = re.findall('g_page_config.*', html)[0][16:len(re.findall('g_page_config.*', html)[0]) - 1]
-            if str.startswith('{') and str.endswith('}'):
-                json_data = json.loads(str)
-                if 'mods' in json_data and 'itemlist' in json_data['mods'] and 'data' in json_data['mods'][
-                    'itemlist'] and 'auctions' in json_data['mods']['itemlist']['data']:
-                    json_data = json_data['mods']['itemlist']['data']['auctions']
-                    for data in json_data:
-                        parse_taobao_detail(data)
+    pages = 0
+    page = 0
+    offset = 44
+    while pages == 0 or page < pages:
+        url = 'https://s.taobao.com/search?q=%s&s=%d' % (keyword, page * offset)
+        response = requests.get(url, headers=taobao_headers,
+                                cookies=parse_cookie(taobao_cookie_str))
+        if response.status_code == 200:
+            html = response.content.decode(response.apparent_encoding)
+            if len(re.findall('security-X5', html)) > 0:
+                raise Exception("打开浏览器通过验证更新淘宝cookie信息")
+            if len(re.findall("<title>\s+\w+", html)) > 0 and (re.findall("<title>\s+\w+", html)[0]).index('淘宝网') != -1:
+                raise Exception("打开浏览器通过验证更新淘宝cookie信息")
+            if len(re.findall('g_page_config.*', html)) > 0:
+                str = re.findall('g_page_config.*', html)[0][16:len(re.findall('g_page_config.*', html)[0]) - 1]
+                if str.startswith('{') and str.endswith('}'):
+                    json_data = json.loads(str)
+                    if 'mods' in json_data and 'itemlist' in json_data['mods'] and 'data' in json_data['mods'][
+                        'itemlist'] and 'auctions' in json_data['mods']['itemlist']['data']:
+                        if pages == 0:
+                            pages = json_data['mods']['pager']['data']['totalPage']
+                        json_data = json_data['mods']['itemlist']['data']['auctions']
+                        for data in json_data:
+                            parse_taobao_detail(data)
     else:
         print('解析淘宝商品列表信息异常')
 
@@ -298,8 +319,11 @@ def parse_taobao_detail(data, pages=5):
 
 def meituan():
     X_FOR_WITH = query.getParam('X_FOR_WITH', '美团', '查询参数')
+    if X_FOR_WITH is None or len(X_FOR_WITH) == 0:
+        raise Exception("X_FOR_WITH参数为空")
     _Param = query.getParam('_', '美团', '查询参数')
-
+    if _Param is None or len(_Param) == 0:
+        raise Exception("_Param参数为空")
     data = 'startIndex=0&sortId=&navigateType=910&firstCategoryId=910&secondCategoryId=910&multiFilterIds=&sliderSelectCode=&sliderSelectMin=&sliderSelectMax=&actualLat=23.099643&actualLng=113.313734&initialLat=23.096943&initialLng=113.329596&geoType=2&rankTraceId=&wm_latitude=%s&wm_longitude=%s&wm_actual_latitude=23099643&wm_actual_longitude=113313734&_token=' % (
         wm_latitude, wm_longitude)
     url = 'http://i.waimai.meituan.com/openh5/channel/kingkongshoplist?_=%s&X-FOR-WITH=%s' % (_Param, X_FOR_WITH)
@@ -410,4 +434,4 @@ def save_log(msg, type='数据库'):
 
 
 if __name__ == '__main__':
-    meituan()
+    parse_yangkeduo('猕猴桃')
