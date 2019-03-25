@@ -2,6 +2,7 @@ import configparser
 import json
 import re
 import time
+from enum import Enum
 
 import pymysql
 import requests
@@ -10,6 +11,8 @@ from lxml import etree
 pc_user_agent = 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'
 
 iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1'
+
+Android='Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.75 Mobile Safari/537.36'
 
 taobao_headers = {
     'User-Agent': pc_user_agent
@@ -23,7 +26,8 @@ pinduoduo_headers = {
 meituan_headers = {
     'Referer': 'http://h5.waimai.meituan.com/waimai/mindex/home',
     'User-Agent': iphone,
-    'Content-Type': 'application/x-www-form-urlencoded'
+    'Content-Type': 'application/x-www-form-urlencoded',
+
 }
 
 gbk = 'gbk'
@@ -53,38 +57,41 @@ class Query:
         # 打开数据库连接
         try:
             return pymysql.connect(host=self.host, port=int(self.port), user=self.user, password=self.password,
-                                   db=self.database)
+                                   db=self.database, charset='utf8')
         except Exception as e:
-            save_log(e)
+            self.save_log(e)
             raise Exception('无法连接数据库')
 
-    def getParam(self, param_key, webtype, param_type):
+    def getParam(self, param_key):
         # 使用cursor()方法获取操作游标
-        db = self.connect()
+        db = None
         cursor = None
         try:
+            db = self.connect()
             cursor = db.cursor()
             cursor.execute(
-                "select param_value from params where param_key='%s' and webtype='%s' and param_type='%s'" % (
-                    param_key, webtype, param_type))
+                "select param_value from params where param_key='%s'" % (param_key))
             result = cursor.fetchall()
             if result is not None and len(result) > 0:
                 return result[0][0]
             else:
-                raise Exception("找不到参数名:%s,网站类型:%s，参数类型:%s的参数" % (param_key, webtype, param_type))
+                raise Exception("找不到参数名:%s的参数" % (param_key))
         except Exception as e:
-            save_log(e)
+            self.save_log(e)
             db.rollback()
         finally:
-            if not cursor is None:
+            if cursor is not None:
                 cursor.close()
-            db.close()
+            if db is not None:
+                db.close()
 
     def insert(self, sql_list):
-        db = self.connect()
-        # 使用cursor()方法获取操作游标
-        cursor = db.cursor()
+        db = None
+        cursor = None
         try:
+            db = self.connect()
+            # 使用cursor()方法获取操作游标
+            cursor = db.cursor()
             for sql in sql_list:
                 print('执行sql:%s' % sql)
                 # 执行sql语句
@@ -92,33 +99,103 @@ class Query:
                 # 执行sql语句
                 db.commit()
         except Exception as e:
-            save_log(e)
+            self.save_log(e)
             # 发生错误时回滚
             db.rollback()
         finally:
             # 关闭数据库连接
-            cursor.close()
-            db.close()
+            if cursor is not None:
+                cursor.close()
+            if db is not None:
+                db.close()
+
+    def save_log(self, msg, type='数据库'):
+        if not msg is str:
+            msg = str(msg).replace('\'', "")
+        print(msg)
+        now = time.localtime(int(time.time()))
+        datetime = time.strftime('%Y-%m-%d %H:%M:%S', now)
+        self.insert(
+            ["insert into log (log_time, log_msg, log_type) VALUES ('%s','%s','%s')" % (datetime, msg, type)])
 
 
-query = Query()
+class Proxy:
 
-# 淘宝cookie
-taobao_cookie_str = query.getParam('cookie', '淘宝', 'cookie')
-if taobao_cookie_str is None or len(taobao_cookie_str) == 0:
-    raise Exception("淘宝Cookie为空")
-# 美团外卖cookie
-meituan_cookie_str = query.getParam('cookie', '美团', 'cookie')
-if meituan_cookie_str is None or len(meituan_cookie_str) == 0:
-    raise Exception("美团Cookie为空")
+    def __init__(self) -> None:
+        super().__init__()
 
-# 经纬度
-wm_latitude = query.getParam('wm_latitude', '美团', '表单参数')
-if wm_latitude is None or len(wm_latitude) == 0:
-    raise Exception('纬度为空')
-wm_longitude = query.getParam('wm_longitude', '美团', '表单参数')
-if wm_longitude is None or len(wm_longitude) == 0:
-    raise Exception("经度为空")
+    def saveProxyToDB(self, uuid='5f076cdfba704d4894137400b1e5204e', num=1):
+        response = requests.get(
+            'http://www.xiladaili.com/api/?uuid=%s&num=%d&place=中国&category=1&protocol=3&sortby=0&repeat=1&format=3&position=1' % (
+                uuid, num))
+        if response.status_code == 200:
+            proxies = response.content.decode(response.apparent_encoding).split(' ')
+            if len(proxies) > 0:
+                with open("proxy.json", "w", encoding=utf8) as file:
+                    query = Query()
+                    for proxy in proxies:
+                        query.insert(["insert ignore into proxy(ip, time) values ('%s',now())" % proxy])
+                        file.write(proxy)
+
+            else:
+                raise Exception("没有代理ip返回")
+        else:
+            raise Exception("请求代理接口失败")
+
+    def selectProxy(self, num):
+        query = Query()
+        try:
+            db = query.connect()
+            cursor = db.cursor()
+            cursor.execute('select ip from proxy limit %d' % num)
+            return cursor.fetchall()
+        except Exception as e:
+            raise Exception("获取代理ip配置失败")
+
+
+class Key(Enum):
+    TAOBAO_COOKIE = 1
+    MEITUAN_COOKIE = 2
+    WM_LATITUDE = 3
+    WM_LONGITUDE = 4
+    ANTI_CONTENT = 5
+    X_FOR_WITH = 6
+    MEITUAN_ = 7
+
+
+class Param():
+    param = {}
+
+    @staticmethod
+    def getParam(key):
+        if len(Param.param) == 0:
+            Param.initParam()
+        if not isinstance(key, Key):
+            raise Exception("参数类型不对")
+        elif key.name not in Param.param:
+            raise Exception("不存在'%s'这个配置" % key)
+        else:
+            return Param.param[key.name]
+
+    @staticmethod
+    def initParam():
+        # 淘宝cookie
+        Param.initNotNullParam(Key.TAOBAO_COOKIE)
+        # 美团外卖cookie
+        Param.initNotNullParam(Key.MEITUAN_COOKIE)
+        # 经纬度
+        Param.initNotNullParam(Key.WM_LATITUDE)
+        Param.initNotNullParam(Key.WM_LONGITUDE)
+
+        Param.initNotNullParam(Key.X_FOR_WITH)
+        Param.initNotNullParam(Key.MEITUAN_)
+
+    @staticmethod
+    def initNotNullParam(key):
+        query = Query()
+        Param.param[key.name] = query.getParam(key.name)
+        if Param.param[key.name] is None or len(Param.param[key.name]) == 0:
+            raise Exception("初始化参数'%s'失败" % key.name)
 
 
 def parse_cookie(cookie_str):
@@ -147,7 +224,7 @@ def parse_yangkeduo_by_1():
 
 
 def parse_yangkeduo(keyword, page=5):
-    anti_content = query.getParam('anti_content', '拼多多', '查询参数')
+    anti_content = Param.getParam(Key.ANTI_CONTENT)
     if anti_content is None or len(anti_content) == 0:
         raise Exception("anti_content参数为空")
     url = 'http://apiv3.yangkeduo.com/search?page=%d&size=50&sort=default&requery=0&list_id=tNlvLMrbCA&q=%s&anti_content=%s&pdduid=0' % (
@@ -169,6 +246,7 @@ def parse_yangkeduo(keyword, page=5):
 # id：商品id
 # size:评论条数
 def parse_yangkeduo_Detail(id, pages=5):
+    query = Query()
     url = 'http://yangkeduo.com/goods.html?goods_id=%d' % id
     print('开始解析：%s' % url)
     response = requests.get(url, headers=pinduoduo_headers)
@@ -178,7 +256,8 @@ def parse_yangkeduo_Detail(id, pages=5):
         if len(rawData) > 0 and str(rawData[0][9:len(rawData[0]) - 1]).startswith('{') and str(
                 rawData[0][9:len(rawData[0]) - 1]).endswith('}'):
             detail_data = json.loads(rawData[0][9:len(rawData[0]) - 1])
-            if 'store' in detail_data and 'initDataObj' in detail_data['store'] and 'goods' in detail_data['store']['initDataObj']:
+            if 'store' in detail_data and 'initDataObj' in detail_data['store'] and 'goods' in detail_data['store'][
+                'initDataObj']:
                 goods = detail_data['store']['initDataObj']['goods']
                 # 商品标题
                 goodsName = "".join(goods['goodsName'].split())
@@ -232,7 +311,7 @@ def parse_taobao(keyword):
     while pages == 0 or page < pages:
         url = 'https://s.taobao.com/search?q=%s&s=%d' % (keyword, page * offset)
         response = requests.get(url, headers=taobao_headers,
-                                cookies=parse_cookie(taobao_cookie_str))
+                                cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE.name)))
         if response.status_code == 200:
             html = response.content.decode(response.apparent_encoding)
             if len(re.findall('security-X5', html)) > 0:
@@ -255,9 +334,10 @@ def parse_taobao(keyword):
 
 
 def parse_taobao_detail(data, pages=5):
+    query = Query()
     url = 'https://detail.tmall.com/item.htm?id=%s' % data['nid']
     print('解析商品:%s\n详情链接:%s' % (data['raw_title'], url))
-    response = requests.get(url, headers=taobao_headers, cookies=parse_cookie(taobao_cookie_str))
+    response = requests.get(url, headers=taobao_headers, cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE.name)))
     if response.status_code == 200:
         try:
             html = response.content.decode(gbk)
@@ -290,7 +370,8 @@ def parse_taobao_detail(data, pages=5):
             url = 'https://rate.tmall.com/list_detail_rate.htm?itemId=%s&sellerId=%s&order=3&currentPage=%s&append=0&content=1' % (
                 data['nid'], data['user_id'], page)
             print('评论接口:%s' % url)
-            response = requests.get(url, headers=taobao_headers, cookies=parse_cookie(taobao_cookie_str))
+            response = requests.get(url, headers=taobao_headers,
+                                    cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE)))
             if response.status_code == 200:
                 comments = response.content.decode(utf8)
                 comments = comments[comments.index('(') + 1:len(comments) - 1]
@@ -317,121 +398,126 @@ def parse_taobao_detail(data, pages=5):
         raise Exception("解析:商品%s详情失败" % data['raw_title'])
 
 
-def meituan():
-    X_FOR_WITH = query.getParam('X_FOR_WITH', '美团', '查询参数')
-    if X_FOR_WITH is None or len(X_FOR_WITH) == 0:
-        raise Exception("X_FOR_WITH参数为空")
-    _Param = query.getParam('_', '美团', '查询参数')
-    if _Param is None or len(_Param) == 0:
-        raise Exception("_Param参数为空")
+def meituan(proxies=None):
+    query = Query()
+    X_FOR_WITH = Param.getParam(Key.X_FOR_WITH)
+    _Param = Param.getParam(Key.MEITUAN_)
+
     data = 'startIndex=0&sortId=&navigateType=910&firstCategoryId=910&secondCategoryId=910&multiFilterIds=&sliderSelectCode=&sliderSelectMin=&sliderSelectMax=&actualLat=23.099643&actualLng=113.313734&initialLat=23.096943&initialLng=113.329596&geoType=2&rankTraceId=&wm_latitude=%s&wm_longitude=%s&wm_actual_latitude=23099643&wm_actual_longitude=113313734&_token=' % (
-        wm_latitude, wm_longitude)
+        Param.getParam(Key.WM_LATITUDE), Param.getParam(Key.WM_LONGITUDE))
     url = 'http://i.waimai.meituan.com/openh5/channel/kingkongshoplist?_=%s&X-FOR-WITH=%s' % (_Param, X_FOR_WITH)
-    cookies = parse_cookie(meituan_cookie_str)
-    response = requests.post(url, data=data, headers=meituan_headers, cookies=cookies)
-    if response.status_code == 200:
-        json_data = json.loads(response.content.decode(utf8))
-        if 'data' in json_data and 'shopList' in json_data['data']:
-            # print(json_data)
-            json_data = json_data['data']['shopList']
-            for shop in json_data:
-                mtWmPoiId = shop['mtWmPoiId']
-                shopName = shop['shopName']
-                monthSalesTip = re.findall('\d+', shop['monthSalesTip'])[0]
-                deliveryTimeTip = shop['deliveryTimeTip']
-                minPriceTip = re.findall('\d+', shop['minPriceTip'])[0]
-                shippingFeeTip = re.findall('\d+', shop['shippingFeeTip'])[0]
-                distance = shop['distance']
-                recommendReason = ''
-                if 'recommendInfo' in shop and 'recommendReason' in shop['recommendInfo']:
-                    recommendReason = shop['recommendInfo']['recommendReason']
-                address = shop['address']
-                shipping_time = shop['shipping_time']
-                print(
-                    'shopName:%s\nmonthSalesTip:%s\nminPriceTip:%s\nshippingFeeTip:%s\ndistance:%s\nrecommendReason:%s\naddresss:%s\nshipping_time:%s' % (
-                        shopName, monthSalesTip, minPriceTip, shippingFeeTip, distance, recommendReason, address,
-                        shipping_time))
-                url = 'http://i.waimai.meituan.com/openh5/poi/food?_=%s&X-FOR-WITH=%s' % (_Param, X_FOR_WITH)
-                form_data = 'geoType=2&mtWmPoiId=1060561747188861&dpShopId=-1&source=shoplist&skuId=&wm_latitude=0&wm_longitude=0&wm_actual_latitude=23099832&wm_actual_longitude=113312682&_token='
-                response = requests.post(url, data=form_data, headers=meituan_headers, cookies=cookies)
-                if response.status_code == 200:
-                    json_data = json.loads(response.content.decode(utf8))
-                    if 'data' in json_data and 'shopInfo' in json_data['data']:
-                        shopInfo = json_data['data']['shopInfo']
-                        deliveryFee = shopInfo['deliveryFee']
-                        deliveryType = shopInfo['deliveryType']
-                        deliveryTime = shopInfo['deliveryTime']
-                        deliveryMsg = shopInfo['deliveryMsg']
-                        minFee = shopInfo['minFee']
-                        print('deliveryFee:%s\ndeliveryType:%s\ndeliveryTime:%s\ndeliveryMsg:%s\nminFee:%s' % (
-                            deliveryFee, deliveryType, deliveryTime, deliveryMsg, minFee))
-                        sql_list = [
-                            "insert into shop_info(mtWmPoiId, shopName, monthSalesTip, deliveryTimeTip, minPriceTip, shippingFeeTip, distance, recommendReason, address, shipping_time,deliveryFee,deliveryType,deliveryTime,deliveryMsg,minFee) VALUES (%s,'%s',%s,'%s',%s,%s,'%s','%s','%s','%s',%s,%s,%s,'%s',%s)" % (
-                                mtWmPoiId, shopName, monthSalesTip, deliveryTimeTip, minPriceTip, shippingFeeTip,
-                                distance,
-                                recommendReason, address, shipping_time, deliveryFee, deliveryType, deliveryTime,
-                                deliveryMsg, minFee)]
-                    else:
-                        raise Exception('解析美团商品店铺详情异常')
-                    if 'data' in json_data and 'categoryList' in json_data['data']:
-                        categoryList = json_data['data']['categoryList']
-                        food_list = {}
-                        for category in categoryList:
-                            food = {'categoryName': category['categoryName']}
-                            categoryName = food['categoryName']
-                            # print('categoryName:%s\n' % categoryName)
-                            spuList = category['spuList']
-                            for spu in spuList:
-                                food['spuId'] = spu['spuId']
-                                food['spuName'] = spu['spuName']
-                                food['unit'] = spu['unit']
-                                food['saleVolume'] = spu['saleVolume']
-                                food['originPrice'] = spu['originPrice']
-                                food['currentPrice'] = spu['currentPrice']
-                                food['spuDesc'] = spu['spuDesc']
-                                # print(
-                                #     'spuName:%s\nunit:%s\nsaleVolume:%s\noriginPrice:%s\ncurrentPrice:%s\nspuDesc:%s' % (
-                                #         spuName, unit, saleVolume, originPrice, currentPrice, spuDesc))
-                                # sql_list.append(
-                                #     "insert into food (spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice, spuDesc) VALUES (%s,'%s','%s','%s',%s,%s,%s,'%s')" % (
-                                #         spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice,
-                                #         spuDesc))
-                                # if food['spuId'] in food_list:
-                                #     food_list[]
-                                if str(food['spuId']) in food_list:
-                                    _food = food_list[str(food['spuId'])]
-                                    _food['categoryName'] += ',' + categoryName
-                                    food_list[str(food['spuId'])] = _food
-                                else:
-                                    food_list[str(food['spuId'])] = food
-                        for food_data in food_list:
-                            _data = food_list[food_data]
-                            sql_list.append(
-                                "insert into food (spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice, spuDesc) VALUES (%s,'%s','%s','%s',%s,%s,%s,'%s')" % (
-                                    _data['spuId'], _data['categoryName'], _data['spuName'],
-                                    _data['unit'], _data['saleVolume'], _data['originPrice'],
-                                    _data['currentPrice'],
-                                    _data['spuDesc']))
-                        query.insert(sql_list)
-                    else:
-                        raise Exception("解析美团店铺详情异常")
-                else:
-                    raise Exception("解析美团商品详情异常")
+    cookies = parse_cookie(Param.getParam(Key.MEITUAN_COOKIE))
+    try:
+        if proxies is None:
+            response = requests.post(url, data=data, headers=meituan_headers, cookies=cookies, proxies=proxies)
         else:
-            raise Exception("解析美团店铺详情异常")
+            response = requests.post(url, data=data, headers=meituan_headers, cookies=cookies)
+    except requests.exceptions.ProxyError as e:
+        raise Exception("代理配置%s有问题" % str(proxies))
+    if response.status_code == 200:
+        content = response.content.decode(utf8)
+        if content.startswith('{') and content.endswith('}'):
+            json_data = json.loads(content)
+            if 'data' in json_data and 'shopList' in json_data['data']:
+                # print(json_data)
+                json_data = json_data['data']['shopList']
+                for shop in json_data:
+                    mtWmPoiId = shop['mtWmPoiId']
+                    shopName = shop['shopName']
+                    monthSalesTip = re.findall('\d+', shop['monthSalesTip'])[0]
+                    deliveryTimeTip = shop['deliveryTimeTip']
+                    minPriceTip = re.findall('\d+', shop['minPriceTip'])[0]
+                    shippingFeeTip = re.findall('\d+', shop['shippingFeeTip'])[0]
+                    distance = shop['distance']
+                    recommendReason = ''
+                    if 'recommendInfo' in shop and 'recommendReason' in shop['recommendInfo']:
+                        recommendReason = shop['recommendInfo']['recommendReason']
+                    address = shop['address']
+                    shipping_time = shop['shipping_time']
+                    print(
+                        'shopName:%s\nmonthSalesTip:%s\nminPriceTip:%s\nshippingFeeTip:%s\ndistance:%s\nrecommendReason:%s\naddresss:%s\nshipping_time:%s' % (
+                            shopName, monthSalesTip, minPriceTip, shippingFeeTip, distance, recommendReason, address,
+                            shipping_time))
+                    url = 'http://i.waimai.meituan.com/openh5/poi/food?_=%s&X-FOR-WITH=%s' % (_Param, X_FOR_WITH)
+                    form_data = 'geoType=2&mtWmPoiId=1060561747188861&dpShopId=-1&source=shoplist&skuId=&wm_latitude=0&wm_longitude=0&wm_actual_latitude=23099832&wm_actual_longitude=113312682&_token='
+                    response = requests.post(url, data=form_data, headers=meituan_headers, cookies=cookies)
+                    if response.status_code == 200:
+                        json_data = json.loads(response.content.decode(utf8))
+                        if 'data' in json_data and 'shopInfo' in json_data['data']:
+                            shopInfo = json_data['data']['shopInfo']
+                            deliveryFee = shopInfo['deliveryFee']
+                            deliveryType = shopInfo['deliveryType']
+                            deliveryTime = shopInfo['deliveryTime']
+                            deliveryMsg = shopInfo['deliveryMsg']
+                            minFee = shopInfo['minFee']
+                            print('deliveryFee:%s\ndeliveryType:%s\ndeliveryTime:%s\ndeliveryMsg:%s\nminFee:%s' % (
+                                deliveryFee, deliveryType, deliveryTime, deliveryMsg, minFee))
+                            sql_list = [
+                                "insert into shop_info(mtWmPoiId, shopName, monthSalesTip, deliveryTimeTip, minPriceTip, shippingFeeTip, distance, recommendReason, address, shipping_time,deliveryFee,deliveryType,deliveryTime,deliveryMsg,minFee) VALUES (%s,'%s',%s,'%s',%s,%s,'%s','%s','%s','%s',%s,%s,%s,'%s',%s)" % (
+                                    mtWmPoiId, shopName, monthSalesTip, deliveryTimeTip, minPriceTip, shippingFeeTip,
+                                    distance,
+                                    recommendReason, address, shipping_time, deliveryFee, deliveryType, deliveryTime,
+                                    deliveryMsg, minFee)]
+                        else:
+                            raise Exception('解析美团商品店铺详情异常')
+                        if 'data' in json_data and 'categoryList' in json_data['data']:
+                            categoryList = json_data['data']['categoryList']
+                            food_list = {}
+                            for category in categoryList:
+                                food = {'categoryName': category['categoryName']}
+                                categoryName = food['categoryName']
+                                # print('categoryName:%s\n' % categoryName)
+                                spuList = category['spuList']
+                                for spu in spuList:
+                                    food['spuId'] = spu['spuId']
+                                    food['spuName'] = spu['spuName']
+                                    food['unit'] = spu['unit']
+                                    food['saleVolume'] = spu['saleVolume']
+                                    food['originPrice'] = spu['originPrice']
+                                    food['currentPrice'] = spu['currentPrice']
+                                    food['spuDesc'] = spu['spuDesc']
+                                    # print(
+                                    #     'spuName:%s\nunit:%s\nsaleVolume:%s\noriginPrice:%s\ncurrentPrice:%s\nspuDesc:%s' % (
+                                    #         spuName, unit, saleVolume, originPrice, currentPrice, spuDesc))
+                                    # sql_list.append(
+                                    #     "insert into food (spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice, spuDesc) VALUES (%s,'%s','%s','%s',%s,%s,%s,'%s')" % (
+                                    #         spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice,
+                                    #         spuDesc))
+                                    # if food['spuId'] in food_list:
+                                    #     food_list[]
+                                    if str(food['spuId']) in food_list:
+                                        _food = food_list[str(food['spuId'])]
+                                        _food['categoryName'] += ',' + categoryName
+                                        food_list[str(food['spuId'])] = _food
+                                    else:
+                                        food_list[str(food['spuId'])] = food
+                            for food_data in food_list:
+                                _data = food_list[food_data]
+                                sql_list.append(
+                                    "insert into food (spuId, categoryName, spuName, unit, saleVolume, originPrice, currentPrice, spuDesc) VALUES (%s,'%s','%s','%s',%s,%s,%s,'%s')" % (
+                                        _data['spuId'], _data['categoryName'], _data['spuName'],
+                                        _data['unit'], _data['saleVolume'], _data['originPrice'],
+                                        _data['currentPrice'],
+                                        _data['spuDesc']))
+                            query.insert(sql_list)
+                        else:
+                            raise Exception("解析美团店铺详情异常")
+                    else:
+                        raise Exception("解析美团商品详情异常")
+            else:
+                raise Exception("解析美团店铺详情异常")
+        else:
+            print(content)
+            raise Exception("接口返回的不是json结构数据")
     else:
         print(response.content.decode(utf8))
-        raise Exception("美团参数过期，需要更新")
-
-
-def save_log(msg, type='数据库'):
-    if not msg is str:
-        msg = str(msg).replace('\'', "")
-    print(msg)
-    now = time.localtime(int(time.time()))
-    datetime = time.strftime('%Y-%m-%d %H:%M:%S', now)
-    query.insert(["insert into log (log_time, log_msg, log_type) VALUES ('%s','%s','%s')" % (datetime, msg, type)])
+        if response.status_code == 403:
+            raise Exception("你没有权限访问接口地址，有可能IP地址被Ban了")
+        elif response.status_code == 404:
+            raise Exception("无法访问接口地址")
+        else:
+            raise Exception("美团参数过期，需要更新")
 
 
 if __name__ == '__main__':
-    parse_yangkeduo('猕猴桃')
+    meituan()
