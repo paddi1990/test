@@ -1,18 +1,22 @@
 import configparser
 import json
+import math
+import os
+import random
 import re
 import time
 from enum import Enum
 
 import pymysql
 import requests
+from urllib import parse
 from lxml import etree
 
 pc_user_agent = 'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'
 
 iphone = 'Mozilla/5.0 (iPhone; CPU iPhone OS 11_0 like Mac OS X) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/11.0 Mobile/15A372 Safari/604.1'
 
-Android='Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.75 Mobile Safari/537.36'
+Android = 'Mozilla/5.0 (Linux; Android 5.0; SM-G900P Build/LRX21T) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/73.0.3683.75 Mobile Safari/537.36'
 
 taobao_headers = {
     'User-Agent': pc_user_agent
@@ -20,7 +24,14 @@ taobao_headers = {
 }
 
 pinduoduo_headers = {
-    'User-Agent': pc_user_agent
+    'Accept': "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8",
+    'Accept-Encoding': "gzip, deflate",
+    'Accept-Language': "zh-CN,zh;q=0.9",
+    'Cache-Control': "max-age=0",
+    'Connection': "keep-alive",
+    'Host': "yangkeduo.com",
+    'Upgrade-Insecure-Requests': "1",
+    'User-Agent': pc_user_agent,
 }
 
 meituan_headers = {
@@ -158,7 +169,6 @@ class Key(Enum):
     MEITUAN_COOKIE = 2
     WM_LATITUDE = 3
     WM_LONGITUDE = 4
-    ANTI_CONTENT = 5
     X_FOR_WITH = 6
     MEITUAN_ = 7
 
@@ -223,24 +233,49 @@ def parse_yangkeduo_by_1():
     print(response.content)
 
 
-def parse_yangkeduo(keyword, page=5):
-    anti_content = Param.getParam(Key.ANTI_CONTENT)
-    if anti_content is None or len(anti_content) == 0:
-        raise Exception("anti_content参数为空")
+def getRandomString(e):
+    e = 32 if not e else e
+    t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    r = ""
+    for i in range(e):
+        _ = math.floor(random.random() * len(t))
+        if _ < len(t):
+            r += t[_]
+    return r
+
+
+def getTimeStamp():
+    return int(round(time.time() * 1000))
+
+wait_time=3
+def parse_yangkeduo(keyword, page=1):
+    referer_page_id = f"10031_{str(getTimeStamp())}_{getRandomString(10)}"
+    referer_page_url = f"""http://yangkeduo.com/search_result.html?search_key={parse.quote(
+        keyword)}&search_src=history&search_met=history_sort&search_met_track=history&refer_page_name=search&refer_page_id={referer_page_id}&refer_page_sn=10031"""
+    cmd = f"node merge.js {referer_page_url}"
+    anti_content = os.popen(cmd).read().strip()
     url = 'http://apiv3.yangkeduo.com/search?page=%d&size=50&sort=default&requery=0&list_id=tNlvLMrbCA&q=%s&anti_content=%s&pdduid=0' % (
         page, keyword, anti_content)
     response = requests.get(url, headers=pinduoduo_headers)
     if response.status_code == 200:
         html = response.content.decode(utf8)
         data_json = json.loads(html)
-        if 'items' in data_json:
-            data_json = data_json['items']
-            for data in data_json:
-                goods_id = data['goods_id']
-                parse_yangkeduo_Detail(goods_id)
+        if 'last_page' in data_json and not data_json['last_page']:
+            if 'items' in data_json:
+                data_json = data_json['items']
+                for data in data_json:
+                    goods_id = data['goods_id']
+                    parse_yangkeduo_Detail(goods_id)
+            parse_yangkeduo(keyword, page + 1)
+        else:
+            raise Exception("在%s中不存在items这个键" % json.dumps(data_json, indent=1))
     else:
         print(response.content.decode(utf8))
-        raise Exception("更新anti_content参数")
+
+        if response.status_code == 403:
+            print("接口访问异常，%d毫秒后在尝试重新请求" % wait_time)
+            time.sleep(wait_time)
+            parse_yangkeduo(keyword, page)
 
 
 # id：商品id
@@ -311,7 +346,7 @@ def parse_taobao(keyword):
     while pages == 0 or page < pages:
         url = 'https://s.taobao.com/search?q=%s&s=%d' % (keyword, page * offset)
         response = requests.get(url, headers=taobao_headers,
-                                cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE.name)))
+                                cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE)))
         if response.status_code == 200:
             html = response.content.decode(response.apparent_encoding)
             if len(re.findall('security-X5', html)) > 0:
@@ -337,7 +372,7 @@ def parse_taobao_detail(data, pages=5):
     query = Query()
     url = 'https://detail.tmall.com/item.htm?id=%s' % data['nid']
     print('解析商品:%s\n详情链接:%s' % (data['raw_title'], url))
-    response = requests.get(url, headers=taobao_headers, cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE.name)))
+    response = requests.get(url, headers=taobao_headers, cookies=parse_cookie(Param.getParam(Key.TAOBAO_COOKIE)))
     if response.status_code == 200:
         try:
             html = response.content.decode(gbk)
@@ -520,4 +555,5 @@ def meituan(proxies=None):
 
 
 if __name__ == '__main__':
-    meituan()
+    # meituan()
+    parse_yangkeduo('猕猴桃')
