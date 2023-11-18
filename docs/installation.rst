@@ -23,7 +23,7 @@ The output files are stored in ``/path/to/output``:
 
 .. csv-table:: Gene expression matrix
    :header: "", "A1BG", "A1CF", "A2M", "A2ML1", "A4GALT", "A4GNT", "AA06", "AAAS", "AACS", "AACSP1", "...", "ZWILCH", "ZWINT", "ZXDA", "ZXDB", "ZXDC", "ZYG11B", "ZYX", "ZZEF1", "ZZZ3", "pk"
-   :widths: 30,5, 5, 5, 5, 5, 5, 5, 5, 5, 5, ..., 5, 5, 5, 5, 5, 5, 5, 5, 5, 5
+   :widths: 30,5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5
 
    "human1_lib1.final_cell_0001", 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, "...", 0, 0, 0, 0, 0, 0, 2, 0, 0, 1
    "human1_lib1.final_cell_0002", 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, "...", 0, 0, 0, 0, 0, 1, 4, 0, 1, 0
