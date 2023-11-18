@@ -20,6 +20,17 @@ The output files are stored in ``/path/to/output``:
 * ``data.readcount``: File containing indexing information of data.json for faster file access and the number of reads for each DRACH positions in eventalign.txt
 * ``eventalign.index``: Index file created during dataprep to allow faster access of Nanopolish eventalign.txt during dataprep
 
+
+.. csv-table:: Gene expression matrix
+   :header: "", "A1BG", "A1CF", "A2M", "A2ML1", "A4GALT", "A4GNT", "AA06", "AAAS", "AACS", "AACSP1", "...", "ZWILCH", "ZWINT", "ZXDA", "ZXDB", "ZXDC", "ZYG11B", "ZYX", "ZZEF1", "ZZZ3", "pk"
+   :widths: 30,5, 5, 5, 5, 5, 5, 5, 5, 5, 5, ..., 5, 5, 5, 5, 5, 5, 5, 5, 5, 5
+
+   "human1_lib1.final_cell_0001", 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, "...", 0, 0, 0, 0, 0, 0, 2, 0, 0, 1
+   "human1_lib1.final_cell_0002", 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, "...", 0, 0, 0, 0, 0, 1, 4, 0, 1, 0
+   "human1_lib1.final_cell_0003", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "...", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+   "human1_lib1.final_cell_0004", 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, "...", 1, 0, 0, 0, 0, 1, 3, 1, 0, 0
+
+
 Now we can run m6anet over our data using m6anet-run_inference::
 
     m6anet-run_inference --input_dir demo_data --out_dir demo_data --n_processes 4 --num_iterations 500
